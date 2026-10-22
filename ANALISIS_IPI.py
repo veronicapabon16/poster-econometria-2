@@ -540,3 +540,127 @@ tabla_comparativa = pd.DataFrame({
 
 print(tabla_comparativa.to_string(index=False))
 print("======================================================================\n")
+
+# %% ==========================================================================
+# PASO 4: PRONÓSTICO FUERA DE MUESTRA Y EXPORTACIÓN DE TABLA COMO IMAGEN (.PNG)
+# =============================================================================
+print("\n=== PASO 4: PRONÓSTICO FUERA DE MUESTRA Y EXPORTACIÓN DE TABLA COMO IMAGEN ===")
+
+# 1. Definir el horizonte de pronóstico (12 meses hacia adelante)
+horizonte_pronostico = 12
+
+# 2. Crear las fechas futuras basándose en la frecuencia mensual ('MS') de la serie
+ultima_fecha = serie_ipi_sa.index[-1]
+fechas_futuras = pd.date_range(
+    start=ultima_fecha + pd.DateOffset(months=1), 
+    periods=horizonte_pronostico, 
+    freq='MS'
+)
+
+# 3. Crear la variable exógena futura para el horizonte de pronóstico
+# Como el shock de la pandemia (2020) ya ocurrió, los valores futuros de la dummy son 0
+dummy_covid_futuro = pd.Series(0, index=fechas_futuras, name='dummy_covid')
+
+# 4. Generar el pronóstico utilizando el objeto ajustado ganador (fit_arima_final)
+pronostico_obj = fit_arima_final.get_forecast(steps=horizonte_pronostico, exog=dummy_covid_futuro)
+pronostico_puntual = pronostico_obj.predicted_mean
+intervalos_confianza = pronostico_obj.conf_int(alpha=0.05)  # Intervalo al 95% de confianza
+
+# 5. Consolidar los resultados en un DataFrame
+df_pronostico = pd.DataFrame({
+    'Pronóstico ln(IPI)': pronostico_puntual,
+    'Límite Inferior (95%)': intervalos_confianza.iloc[:, 0],
+    'Límite Superior (95%)': intervalos_confianza.iloc[:, 1]
+})
+
+# Revertir la transformación logarítmica para obtener la escala real del IPI
+df_pronostico['Pronóstico Escala Real (IPI)'] = np.exp(pronostico_puntual)
+
+# Imprimir los valores en la consola
+print("\n--- Tabla de Pronósticos en Consola ---")
+print(df_pronostico.to_string(float_format=lambda x: f"{x:.4f}"))
+
+# 6. Gráfico formal del pronóstico para el póster o análisis
+plt.figure(figsize=(12, 6))
+
+# Graficar los últimos 36 meses de la serie histórica para dar contexto visual
+plt.plot(
+    serie_ipi_sa.index[-36:], 
+    serie_ipi_sa.iloc[-36:], 
+    label='Histórico Ajustado (Últimos 3 años)', 
+    color='navy', 
+    linewidth=1.5
+)
+
+# Graficar la línea de pronóstico puntual
+plt.plot(
+    fechas_futuras, 
+    pronostico_puntual, 
+    label='Pronóstico (ARIMA + Dummy)', 
+    color='darkorange', 
+    marker='o', 
+    linewidth=2
+)
+
+# Graficar la banda del intervalo de confianza (95%)
+plt.fill_between(
+    fechas_futuras,
+    intervalos_confianza.iloc[:, 0],
+    intervalos_confianza.iloc[:, 1],
+    color='orange',
+    alpha=0.2,
+    label='Intervalo de Confianza (95%)'
+)
+
+plt.title("Pronóstico del Índice de Producción Industrial (Enfoque STL + ARIMA + Dummy)", fontsize=12, fontweight='bold')
+plt.xlabel("Fecha")
+plt.ylabel("ln(IPI) - Ajustado por Estacionalidad")
+plt.legend(loc='upper left')
+plt.grid(True, linestyle='--', alpha=0.5)
+plt.tight_layout()
+plt.show()
+
+# 7. GENERACIÓN Y GUARDADO DE LA TABLA COMO ARCHIVO DE IMAGEN (.PNG)
+df_tabla = df_pronostico.copy()
+df_tabla.index = df_tabla.index.strftime('%Y-%m')
+
+columnas = ['Fecha', 'ln(IPI)', 'Límite Inf. (95%)', 'Límite Sup. (95%)', 'IPI Escala Real']
+valores = [[idx] + [f"{val:.4f}" for val in row] for idx, row in zip(df_tabla.index, df_tabla.values)]
+
+# Crear figura para la tabla
+fig, ax = plt.subplots(figsize=(10, 6), dpi=300)
+ax.axis('tight')
+ax.axis('off')
+
+# Renderizar la tabla con estilos profesionales
+tabla = ax.table(
+    cellText=valores,
+    colLabels=columnas,
+    cellLoc='center',
+    loc='center'
+)
+
+tabla.auto_set_font_size(False)
+tabla.set_fontsize(9)  # <--- CORREGIDO AQUÍ
+tabla.scale(1.2, 1.5)
+
+# Estilizar celdas y encabezados (Azul académico y filas alternadas)
+for (row, col), cell in tabla.get_celld().items():
+    if row == 0:
+        cell.set_facecolor('#1e3a8a')
+        cell.get_text().set_color('white')
+        cell.get_text().set_weight('bold')
+    elif row % 2 == 0:
+        cell.set_facecolor('#f1f5f9')
+    else:
+        cell.set_facecolor('#ffffff')
+
+plt.title("TABLA DE PRONÓSTICOS DEL ÍNDICE DE PRODUCCIÓN INDUSTRIAL (IPI)", fontsize=12, fontweight='bold', pad=15)
+
+# Guardar la imagen en el directorio de trabajo
+ruta_imagen_tabla = BASE_DIR / "tabla_pronostico_ipi.png"
+plt.savefig(ruta_imagen_tabla, bbox_inches='tight', dpi=300)
+plt.show()
+
+print(f"\n---> ¡ÉXITO! La imagen de la tabla fue guardada automáticamente en:\n     {ruta_imagen_tabla}")
+# %%
