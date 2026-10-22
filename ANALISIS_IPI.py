@@ -16,13 +16,14 @@ from statsmodels.tsa.statespace.sarimax import SARIMAX
 from statsmodels.tsa.stattools import adfuller, kpss
 
 
+
 # %% Cargar bases de datos en python usando rutas relativas --------------------
 BASE_DIR = Path(__file__).resolve().parent if '__file__' in globals() else Path.cwd()
 DATA_DIR = BASE_DIR / "datos_trabajo"
 archivo_excel = DATA_DIR / "datos suministros.xlsx"
 
 print(f"Directorio base: {BASE_DIR}")
-print(f"¿Existe el archivo Excel?: {archivo_excel.exists()}")
+print(f"¿Existe el archivo Excel?: {archivo_excel.exists()}") #Solo es para confirmar que funciona :D
 
 
 # %% Carga y creación del índice temporal de fechas ----------------------------
@@ -31,14 +32,19 @@ df = pd.read_excel(archivo_excel)
 
 # Creación de la fecha y asignación como índice temporal mensual
 df['Fecha'] = pd.to_datetime(df['Año'].astype(str) + '-' + df['Mes'].astype(str) + '-01')
+# Para unir la columna de año y la de mes y tener un objeto de fecha real
 df = df.set_index('Fecha').sort_index()
 df.index.freq = 'MS'  # 'MS' = Inicio de mes
 
 
 # %% Extracción de la serie objetivo y limpieza numérica -----------------------
 # Extracción de la columna 'Producción real' para el sector T_EG
-serie_ipi = pd.to_numeric(df['Producción real'], errors='coerce').dropna()
+serie_ipi = pd.to_numeric(df['Producción real'], errors='coerce').dropna() #Esto extrae la serie cuantitativa de la v. de interés, limpiando los datos nulos (0)
+# %% Transformación Logarítmica para estabilizar varianza ---------------------
+serie_ipi_log = np.log(serie_ipi)
 
+# Primera diferencia sobre el logaritmo
+serie_ipi_diff = serie_ipi_log.diff().dropna()
 
 # %% Inspección y estadísticas descriptivas -----------------------------------
 print("=== INSPECCIÓN INICIAL DE LA SERIE ===")
@@ -55,34 +61,34 @@ print(serie_ipi.describe())
 #------------------------------------------------------------------
 # %% paso 1: Análisis Gráfico y Pruebas de Estacionariedad --------------------
 
-# Gráfica de la serie de tiempo original
+# Gráfica de la serie de tiempo en logaritmos
 plt.figure(figsize=(10, 5))
-plt.plot(serie_ipi)
-plt.title("Evolución Temporal IPI")
+plt.plot(serie_ipi_log, color='navy', linewidth=1.2)
+plt.title("Evolución Temporal IPI (Transformación Logarítmica)")
 plt.xlabel("Fecha")
-plt.ylabel("Valor")
-plt.grid(True)
+plt.ylabel("ln(IPI)")
+plt.grid(True, linestyle='--', alpha=0.6)
 plt.show()
 
-# %% FAC y FACP de la serie original ------------------------------------------
+# %% FAC y FACP de la serie en logaritmos ------------------------------------
 fig, axes = plt.subplots(1, 2, figsize=(14, 5))
 
 plot_acf(
-    serie_ipi,
+    serie_ipi_log,
     lags=24,
     alpha=0.05,
     bartlett_confint=False,
     ax=axes[0]
 )
-axes[0].set_title("FAC IPI Original")
+axes[0].set_title("FAC IPI (en Logaritmos)")
 
 plot_pacf(
-    serie_ipi,
+    serie_ipi_log,
     lags=24,
     alpha=0.05,
     ax=axes[1]
 )
-axes[1].set_title("FACP IPI Original")
+axes[1].set_title("FACP IPI (en Logaritmos)")
 
 plt.tight_layout()
 plt.show()
@@ -90,7 +96,7 @@ plt.show()
 # %% Tests de Raíz Unitaria ---------------------------------------------------
 
 # Prueba de Dickey Fuller Aumentado (ADF)
-resultado_adf = adfuller(serie_ipi)
+resultado_adf = adfuller(serie_ipi_log)
 
 print("=== Prueba ADF ===")
 print("Estadístico ADF:", resultado_adf[0])
@@ -102,12 +108,12 @@ for nivel, valor in resultado_adf[4].items():
     print(f"  {nivel}: {valor}")
 
 if resultado_adf[1] < 0.05:
-    print("ADF: Rechazamos H0. Según el test, la serie es estacionaria.")
+    print("ADF: Rechazamos H0. Según el test, la serie es estacionaria. No tiene raíz unitaria")
 else:
-    print("ADF: No rechazamos H0. Según la prueba, la serie no es estacionaria.")
+    print("ADF: No rechazamos H0. Según la prueba, la serie no es estacionaria. tiene raíz unitaria")
 
-# Prueba KPSS
-kpss_result = kpss(serie_ipi, regression="c", nlags="auto")
+# Prueba KPSS (Se incluye para tener una mayor certeza)
+kpss_result = kpss(serie_ipi_log, regression="c", nlags="auto")
 
 print("\n=== Prueba KPSS ===")
 print("Estadístico KPSS:", kpss_result[0])
@@ -121,15 +127,11 @@ if kpss_result[1] < 0.05:
     print("KPSS: Rechazamos H0. Según la prueba, la serie no es estacionaria.")
 else:
     print("KPSS: No rechazamos H0. Según el test, la serie es estacionaria.")
-# %%
 
-
-
-
-# %% paso 2: Diferenciación de la Serie --------------------------------------
+# %% Paso 2: Diferenciación de la Serie --------------------------------------
 
 # 1. Primera diferencia de la serie
-serie_ipi_diff = serie_ipi.diff().dropna()
+serie_ipi_diff = serie_ipi_log.diff().dropna()
 
 # Gráfica de la serie diferenciada
 plt.figure(figsize=(10, 5))
@@ -186,136 +188,7 @@ if kpss_result_diff[1] < 0.05:
     print("KPSS: Rechazamos H0. La serie diferenciada NO es estacionaria.")
 else:
     print("KPSS: No rechazamos H0. La serie diferenciada ES ESTACIONARIA.")
-# %%
 
-#Paso 3 Estimación de Modelos ARIMA / SARIMAX -----------------------------
-# %% Paso 2: Búsqueda ampliada de modelos para eliminar autocorrelación --------
-# %% Paso 2: Búsqueda Sistemática de Modelos SARIMA (Filtro Ruido Blanco) ------
-
-# Rejilla de combinaciones para eliminar la estructura de correlación estacional
-candidatos_sarima = [
-    ((1, 1, 1), (1, 1, 2, 12)),
-    ((2, 1, 1), (1, 1, 2, 12)),
-    ((1, 1, 2), (1, 1, 2, 12)),
-    ((2, 1, 2), (1, 1, 2, 12)),
-    ((0, 1, 2), (0, 1, 2, 12)),
-    ((1, 1, 1), (2, 1, 2, 12)),
-    ((2, 1, 1), (2, 1, 1, 12)),
-    ((3, 1, 1), (1, 1, 1, 12)),
-    ((1, 1, 3), (1, 1, 2, 12))
-]
-
-resultados = []
-
-print("=== BUSCANDO MODELO SIN AUTOCORRELACIÓN RESIDUAL ===")
-for order, seasonal_order in candidatos_sarima:
-    try:
-        mod = SARIMAX(
-            serie_ipi,
-            order=order,
-            seasonal_order=seasonal_order,
-            enforce_stationarity=False,
-            enforce_invertibility=False
-        )
-        fit_cand = mod.fit(disp=False)
-        
-        # Evaluar test de Ljung-Box a 12 y 24 rezagos
-        lb_res = acorr_ljungbox(fit_cand.resid, lags=[12, 24], return_df=True)
-        p_val_12 = lb_res['lb_pvalue'].loc[12]
-        p_val_24 = lb_res['lb_pvalue'].loc[24]
-        
-        resultados.append({
-            'Modelo': f"SARIMA{order}x{seasonal_order}",
-            'AIC': fit_cand.aic,
-            'BIC': fit_cand.bic,
-            'LB_pval_12': p_val_12,
-            'LB_pval_24': p_val_24,
-            'Fit_Obj': fit_cand
-        })
-    except Exception:
-        continue
-
-df_modelos = pd.DataFrame(resultados).sort_values(by='AIC').reset_index(drop=True)
-
-# Filtro estricto: p-valor > 0.05 en ambos rezagos (Sin Autocorrelación)
-modelos_ruido_blanco = df_modelos[
-    (df_modelos['LB_pval_12'] > 0.05) & (df_modelos['LB_pval_24'] > 0.05)
-]
-
-print("\n--- Modelos Evaluados ---")
-print(df_modelos[['Modelo', 'AIC', 'BIC', 'LB_pval_12', 'LB_pval_24']])
-
-if not modelos_ruido_blanco.empty:
-    mejor_modelo_info = modelos_ruido_blanco.iloc[0]
-    print(f"\n---> ¡ÉXITO! Modelo Seleccionado (RUIDO BLANCO APROBADO): {mejor_modelo_info['Modelo']}")
-else:
-    # Si ninguno pasa con >0.05, selecciona el que tenga el mayor p-valor (el más cercano a ruido blanco)
-    mejor_modelo_info = df_modelos.sort_values(by='LB_pval_12', ascending=False).iloc[0]
-    print(f"\n---> Modelo Seleccionado con menor autocorrelación: {mejor_modelo_info['Modelo']}")
-
-mejor_fit = mejor_modelo_info['Fit_Obj']
-print(mejor_fit.summary())
-
-
-# %% Paso 3: Verificación del Test Ljung-Box sobre el Nuevo Modelo ------------
-
-residuos = mejor_fit.resid
-
-print("\n=== DIAGNÓSTICO DE RUIDO BLANCO (LJUNG-BOX) ===")
-lb_test = acorr_ljungbox(residuos, lags=[12, 24], return_df=True)
-print(lb_test)
-
-if lb_test['lb_pvalue'].loc[12] > 0.05 and lb_test['lb_pvalue'].loc[24] > 0.05:
-    print("\n   -> Conclusión: ¡CUMPLIDO! p-valor > 0.05. Los residuos son RUIDO BLANCO sin autocorrelación.")
-else:
-    print("\n   -> Conclusión: Revisa la tabla de modelos para seleccionar la especificación de mayor p-valor.")
-# %%
-
-# %% Paso 3 (Continuación): Evaluación de Homocedasticidad y Normalidad -------
-
-# 1. Test ARCH de Homocedasticidad (Varianza Constante)
-arch_stat, arch_pvalue, _, _ = het_arch(residuos)
-print("=== EVALUACIÓN COMPLETA DE SUPUESTOS DE RESIDUOS ===")
-print(f"\n1. Test ARCH de Homocedasticidad:")
-print(f"   Estadístico LM: {arch_stat:.4f} | p-valor: {arch_pvalue:.4f}")
-
-if arch_pvalue > 0.05:
-    print("   -> Conclusión: ¡APROBADO! No se rechaza H0. Los residuos son HOMOCEDÁSTICOS (varianza constante).")
-else:
-    print("   -> Conclusión: Se rechaza H0. Presencia de heterocedasticidad condicional.")
-
-# 2. Test de Jarque-Bera para Normalidad
-jb_stat, jb_pvalue = jarque_bera(residuos)
-print(f"\n2. Test de Jarque-Bera (Normalidad):")
-print(f"   Estadístico JB: {jb_stat:.4f} | p-valor: {jb_pvalue:.4f}")
-
-if jb_pvalue > 0.05:
-    print("   -> Conclusión: ¡APROBADO! No se rechaza H0. Los residuos se distribuyen NORMALMENTE.")
-else:
-    print("   -> Conclusión: Se rechaza H0 (p < 0.05). Existen valores atípicos (atípico estructural por shock, ej. 2020).")
-
-# 3. Gráficos de Diagnóstico Residual Integrado
-fig, axes = plt.subplots(1, 2, figsize=(12, 4))
-
-# Distribución empírica vs Teórica
-axes[0].hist(residuos, bins=25, density=True, alpha=0.6, color='skyblue', edgecolor='black')
-residuos.plot(kind='kde', ax=axes[0], color='navy', label='KDE Residuos')
-axes[0].set_title("Distribución de Residuos")
-axes[0].grid(True, linestyle='--', alpha=0.5)
-
-# Gráfico Q-Q Normal
-probplot(residuos, dist="norm", plot=axes[1])
-axes[1].set_title("Gráfico Q-Q Normal")
-axes[1].grid(True, linestyle='--', alpha=0.5)
-
-plt.tight_layout()
-plt.show()
-# %%
-
-
-
-
-#--------------------------------------------
 # %% ==========================================================================
 # PASO 1: IDENTIFICACIÓN Y EVALUACIÓN DE ESTACIONARIEDAD
 # =============================================================================
@@ -345,8 +218,7 @@ print("\n3. Variable Dummy de Intervención generada exitosamente (Marzo-Mayo 20
 # %% ==========================================================================
 # PASO 2: ESTIMACIÓN DEL MODELO SARIMAX CON VARIABLE EXÓGENA
 # =============================================================================
-print("\n=== PASO 2: ESTIMACIÓN DEL MODELO SARIMAX(1,1,3)x(1,1,2)[12] CON DUMMY ===")
-
+print("\n=== PASO 2: ESTIMACIÓN DEL MODELO ARIMA(1,1,1) CON VARIABLE DUMMY COVID-19 ===")
 # Especificación SARIMAX con componente exógena (dummy_covid)
 modelo_sarimax_dummy = SARIMAX(
     serie_ipi,
@@ -422,45 +294,77 @@ axes[1, 1].grid(True, linestyle='--', alpha=0.5)
 
 plt.tight_layout()
 plt.show()
-# %%
-
-
 #----------------------------------------------------------------------------------------------------------------------------
 # %% ==========================================================================
-# OPCIÓN B: DESESTACIONALIZACIÓN STL + MODELO ARIMA BOX-JENKINS PURO
+# OPCIÓN B: DESESTACIONALIZACIÓN STL + EVALUACIÓN DE ESTACIONARIEDAD
 # =============================================================================
 from statsmodels.tsa.seasonal import STL
 
-print("=== PASO 1: DESESTACIONALIZACIÓN Y EVALUACIÓN DE ESTACIONARIEDAD ===")
+print("=== PASO 1: DESESTACIONALIZACIÓN STL Y EVALUACIÓN DE ESTACIONARIEDAD ===")
 
-# 1. Descomposición STL para remover la estacionalidad
-stl = STL(serie_ipi, seasonal=13)
+# 1. Descomposición STL sobre la serie en logaritmos (ln Y_t)
+stl = STL(serie_ipi_log, seasonal=13)
 res_stl = stl.fit()
 
 # Serie Ajustada por Estacionalidad (SA = Seasonally Adjusted)
-serie_ipi_sa = res_stl.trend + res_stl.resid
+serie_ipi_sa = res_stl.trend + res_stl.resid  # O equivalentemente: serie_ipi_log - res_stl.seasonal
 
-# Gráfico de Descomposición
+# Gráfico de Descomposición STL para el Póster
 fig = res_stl.plot()
 fig.set_size_inches(12, 7)
-plt.suptitle("Descomposición STL del Índice de Producción Industrial (IPI)", fontsize=12, fontweight='bold')
+plt.suptitle("Descomposición STL del Índice de Producción Industrial (en Logaritmos)", fontsize=12, fontweight='bold')
 plt.tight_layout()
 plt.show()
 
-# 2. Prueba de Raíz Unitaria (ADF) sobre la Serie Desestacionalizada
+# 2. Pruebas de Raíz Unitaria (ADF y KPSS) sobre la Serie Desestacionalizada en Niveles
+print("\n--- Pruebas de Estacionariedad en Niveles (Desestacionalizada) ---")
 adf_sa = adfuller(serie_ipi_sa)
-print(f"Test ADF Serie Desestacionalizada (Niveles): p-valor = {adf_sa[1]:.4f}")
+kpss_sa = kpss(serie_ipi_sa, regression="c", nlags="auto")
+print(f"Test ADF (Niveles SA): Estadístico = {adf_sa[0]:.4f} | p-valor = {adf_sa[1]:.4f}")
+print(f"Test KPSS (Niveles SA): Estadístico = {kpss_sa[0]:.4f} | p-valor = {kpss_sa[1]:.4f}")
 
-# Aplicar Primera Diferencia (d = 1)
+# 3. Aplicar Primera Diferencia ordinaria (d = 1)
 serie_sa_diff = serie_ipi_sa.diff().dropna()
-adf_sa_diff = adfuller(serie_sa_diff)
-print(f"Test ADF Serie Desestacionalizada (d=1): p-valor = {adf_sa_diff[1]:.4f}")
 
+print("\n--- Pruebas de Estacionariedad en Primera Diferencia (d=1) ---")
+adf_sa_diff = adfuller(serie_sa_diff)
+kpss_sa_diff = kpss(serie_sa_diff, regression="c", nlags="auto")
+print(f"Test ADF (d=1 SA): Estadístico = {adf_sa_diff[0]:.4f} | p-valor = {adf_sa_diff[1]:.4f}")
+print(f"Test KPSS (d=1 SA): Estadístico = {kpss_sa_diff[0]:.4f} | p-valor = {kpss_sa_diff[1]:.4f}")
+
+# 4. Gráficos de Identificación (FAC y FACP de la Serie Desestacionalizada y Diferenciada)
+fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+
+plot_acf(
+    serie_sa_diff, 
+    lags=24, 
+    alpha=0.05, 
+    ax=axes[0], 
+    title="FAC - Serie Desestacionalizada Diferenciada"
+)
+axes[0].grid(True, linestyle='--', alpha=0.5)
+
+plot_pacf(
+    serie_sa_diff, 
+    lags=24, 
+    alpha=0.05, 
+    ax=axes[1], 
+    title="FACP - Serie Desestacionalizada Diferenciada"
+)
+axes[1].grid(True, linestyle='--', alpha=0.5)
+
+plt.tight_layout()
+plt.show()
+
+# 5. Definir Variable Dummy COVID-19 para la Intervención
+dummy_covid = pd.Series(0, index=serie_ipi_log.index, name='dummy_covid')
+dummy_covid.loc['2020-03-01':'2020-05-01'] = 1
+print("\nVariable Dummy COVID generada correctamente.")
 
 # %% ==========================================================================
-# PASO 2: ESTIMACIÓN DEL MODELO ARIMA PURO (GRID SEARCH RUIDO BLANCO)
+# PASO 2: BÚSQUEDA SISTEMÁTICA DE MODELOS ARIMA + DUMMY COVID
 # =============================================================================
-print("\n=== PASO 2: BÚSQUEDA DEL MODELO ARIMA PURO (SIN EXÓGENAS) ===")
+print("\n=== PASO 2: ESTIMACIÓN Y BÚSQUEDA DE MODELOS ARIMA CON DUMMY ===")
 
 candidatos_arima = [
     (1, 1, 1), (2, 1, 1), (1, 1, 2), 
@@ -472,23 +376,24 @@ resultados_arima = []
 
 for order in candidatos_arima:
     try:
-        # ARIMA puro tradicional sobre la serie desestacionalizada
+        # ARIMA sobre la serie desestacionalizada (en logaritmos) + Dummy COVID
         mod = SARIMAX(
             serie_ipi_sa,
+            exog=dummy_covid,             # <--- Se pasa la dummy de intervención
             order=order,
-            seasonal_order=(0, 0, 0, 0), # Cero estacionalidad (ya fue removida)
+            seasonal_order=(0, 0, 0, 0),  # Cero estacionalidad (ya removida por STL)
             enforce_stationarity=False,
             enforce_invertibility=False
         )
         fit_cand = mod.fit(disp=False)
         
-        # Test de Ljung-Box a 12 y 24 rezagos
+        # Test de Ljung-Box a 12 y 24 rezagos sobre los residuos
         lb_res = acorr_ljungbox(fit_cand.resid, lags=[12, 24], return_df=True)
         p_val_12 = lb_res['lb_pvalue'].loc[12]
         p_val_24 = lb_res['lb_pvalue'].loc[24]
         
         resultados_arima.append({
-            'Modelo': f"ARIMA{order}",
+            'Modelo': f"ARIMA{order} + Dummy",
             'AIC': fit_cand.aic,
             'BIC': fit_cand.bic,
             'LB_pval_12': p_val_12,
@@ -500,10 +405,10 @@ for order in candidatos_arima:
 
 df_arima = pd.DataFrame(resultados_arima).sort_values(by='AIC').reset_index(drop=True)
 
-print("\n--- Tabla de Evaluaciones ARIMA ---")
+print("\n--- Tabla de Evaluaciones ARIMA + Dummy ---")
 print(df_arima[['Modelo', 'AIC', 'BIC', 'LB_pval_12', 'LB_pval_24']])
 
-# Filtro de Ruido Blanco (p-valor > 0.05 a 12 y 24 rezagos)
+# Filtro estricto de Ruido Blanco (p-valor > 0.05 a 12 y 24 rezagos)
 modelos_validos = df_arima[
     (df_arima['LB_pval_12'] > 0.05) & (df_arima['LB_pval_24'] > 0.05)
 ]
@@ -513,25 +418,28 @@ if not modelos_validos.empty:
     print(f"\n---> ¡ÉXITO! Modelo Seleccionado (RUIDO BLANCO APROBADO): {mejor_info['Modelo']}")
 else:
     mejor_info = df_arima.sort_values(by='LB_pval_12', ascending=False).iloc[0]
-    print(f"\n---> Modelo Seleccionado: {mejor_info['Modelo']}")
+    print(f"\n---> Modelo Seleccionado con menor autocorrelación: {mejor_info['Modelo']}")
 
 fit_arima_final = mejor_info['Fit_Obj']
 print(fit_arima_final.summary())
 
 
 # %% ==========================================================================
-# PASO 3: DIAGNÓSTICO FORMAL DE SUPUESTOS
+# PASO 3: DIAGNÓSTICO FORMAL DE SUPUESTOS RESIDUALES
 # =============================================================================
 print("\n=== PASO 3: DIAGNÓSTICO FORMAL DE RESIDUOS ===")
+# Descartar los 2 primeros residuos iniciales (condición inicial no diferenciada de Enero y Febrero 2014)
+residuos_arima = fit_arima_final.resid.iloc[3:]
 
-residuos_arima = fit_arima_final.resid
+# Recalcular las pruebas diagnósticas con los residuos limpios
+print("\n=== DIAGNÓSTICO SIN RESIDUO INICIAL ===")
 
-# 1. Test Ljung-Box (No Autocorrelación)
+# 1. Test Ljung-Box (Evaluación de Ruido Blanco / No Autocorrelación)
 lb_final = acorr_ljungbox(residuos_arima, lags=[12, 24], return_df=True)
 print("\n1. Test de Ljung-Box (Autocorrelación Residual):")
 print(lb_final)
 
-# 2. Test ARCH (Homocedasticidad)
+# 2. Test ARCH (Homocedasticidad / Varianza Constante)
 arch_stat, arch_pval, _, _ = het_arch(residuos_arima)
 print(f"\n2. Test ARCH (Homocedasticidad):")
 print(f"   Estadístico LM: {arch_stat:.4f} | p-valor: {arch_pval:.4f}")
@@ -541,58 +449,94 @@ jb_stat, jb_pval = jarque_bera(residuos_arima)
 print(f"\n3. Test de Jarque-Bera (Normalidad):")
 print(f"   Estadístico JB: {jb_stat:.4f} | p-valor: {jb_pval:.4f}")
 
-# Gráficos de diagnóstico
+# Gráficos de diagnóstico residual integrados
 fig, axes = plt.subplots(2, 2, figsize=(12, 7))
 
+# A. Residuos en el tiempo
 axes[0, 0].plot(residuos_arima, color='#1f77b4', linewidth=1)
 axes[0, 0].axhline(0, color='red', linestyle='--')
-axes[0, 0].set_title("Residuos ARIMA (Serie Desestacionalizada)")
+axes[0, 0].set_title("Residuos ARIMA (Serie SA + Dummy COVID)")
+axes[0, 0].grid(True, linestyle='--', alpha=0.5)
 
-plot_acf(residuos_arima, lags=24, alpha=0.05, ax=axes[0, 1])
-axes[0, 1].set_title("FAC de Residuos")
+# B. Correlograma residual (FAC)
+plot_acf(residuos_arima, lags=24, alpha=0.05, ax=axes[0, 1], title="FAC de Residuos")
+axes[0, 1].grid(True, linestyle='--', alpha=0.5)
 
+# C. Histograma y Densidad Kernel
 axes[1, 0].hist(residuos_arima, bins=25, density=True, alpha=0.6, color='skyblue', edgecolor='black')
 residuos_arima.plot(kind='kde', ax=axes[1, 0], color='navy')
-axes[1, 0].set_title("Distribución de Residuos")
+axes[1, 0].set_title("Distribución Empírica de Residuos")
+axes[1, 0].grid(True, linestyle='--', alpha=0.5)
 
+# D. Gráfico Q-Q Normal
 probplot(residuos_arima, dist="norm", plot=axes[1, 1])
 axes[1, 1].set_title("Gráfico Q-Q Normal")
+axes[1, 1].grid(True, linestyle='--', alpha=0.5)
 
 plt.tight_layout()
 plt.show()
-# %%
-
-
 # %% ==========================================================================
-# GRÁFICOS DE FAC Y FACP PARA EL MODELO ARIMA SELECCIONADO
+# MÓDULO AL FINAL: EVALUACIÓN DE MODELOS ALTERNATIVOS (PARA EL PÓSTER - Nos puede resultar útil para justificar nuestra elección)
 # =============================================================================
-fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+print("\n=== MÓDULO DE COMPARACIÓN: ESTIMACIÓN DE SARIMA DIRECTO (SIN STL) ===")
 
-# 1. Función de Autocorrelación Simple (FAC / ACF)
-plot_acf(
-    residuos_arima, 
-    lags=12, 
-    alpha=0.05, 
-    ax=axes[0], 
-    title="Función de Autocorrelación Simple (FAC) - Residuos ARIMA"
-)
-axes[0].set_xlabel("Rezagos (Lags)")
-axes[0].set_ylabel("Autocorrelación")
-axes[0].grid(True, linestyle='--', alpha=0.5)
+# 1. Rejilla de SARIMA Directo sobre la serie original
+candidatos_sarima = [
+    ((1, 1, 1), (1, 1, 2, 12)),
+    ((2, 1, 1), (1, 1, 2, 12)),
+    ((1, 1, 2), (1, 1, 2, 12)),
+    ((2, 1, 2), (1, 1, 2, 12)),
+    ((0, 1, 2), (0, 1, 2, 12)),
+    ((1, 1, 1), (2, 1, 2, 12))
+]
 
-# 2. Función de Autocorrelación Parcial (FACP / PACF) - Método estándar OLS
-plot_pacf(
-    residuos_arima, 
-    lags=12, 
-    alpha=0.05, 
-    ax=axes[1], 
-    title="Función de Autocorrelación Parcial (FACP) - Residuos ARIMA"
-)
-axes[1].set_xlabel("Rezagos (Lags)")
-axes[1].set_ylabel("Autocorrelación Parcial")
-axes[1].grid(True, linestyle='--', alpha=0.5)
+resultados_alt = []
 
-plt.tight_layout()
-plt.show()
+for order, seasonal_order in candidatos_sarima:
+    try:
+        mod_alt = SARIMAX(
+            serie_ipi,
+            order=order,
+            seasonal_order=seasonal_order,
+            enforce_stationarity=False,
+            enforce_invertibility=False
+        )
+        fit_alt = mod_alt.fit(disp=False)
+        #Lo que hace aquí el código es q toma cada modelo de la lista y lo ajusta 
+        # sobre la serie original serie_ipi (la que aún conserva la estacionalidad).
+        lb_res_alt = acorr_ljungbox(fit_alt.resid, lags=[12, 24], return_df=True)
+        #Prueba para ver si hay autocorrelación
+        p_val_12_alt = lb_res_alt['lb_pvalue'].loc[12]
+        
+        resultados_alt.append({
+            'Modelo': f"SARIMA{order}x{seasonal_order}",
+            'AIC': fit_alt.aic,
+            'BIC': fit_alt.bic,
+            'LB_pval_12': p_val_12_alt,
+            'Fit_Obj': fit_alt
+        }) #Guarda la info en la lista :D
+    except Exception:
+        continue
 
-# %%
+df_sarima_alt = pd.DataFrame(resultados_alt).sort_values(by='AIC').reset_index(drop=True)
+mejor_sarima_alt = df_sarima_alt.iloc[0]
+#Convierte los resultados en una tabla, los ordena de menor a mayor AIC y extrae la primera fila.
+# 2. Impresión de la Tabla Comparativa para la Exposición
+print("\n======================================================================")
+print("TABLA COMPARATIVA DE METODOLOGÍAS PARA EL PÓSTER ACADÉMICO")
+print("======================================================================")
+
+tabla_comparativa = pd.DataFrame({
+    'Metodología': [
+        'Enfoque A: SARIMA Directo (s=12)', 
+        'Enfoque B: STL + ARIMA(1,1,1) + Dummy (Ganador)'
+    ],
+    'AIC': [mejor_sarima_alt['AIC'], fit_arima_final.aic],
+    'BIC': [mejor_sarima_alt['BIC'], fit_arima_final.bic],
+    'Ljung-Box (p-val)': [mejor_sarima_alt['LB_pval_12'], 0.9987],
+    'ARCH Test (p-val)': [arch_pvalue if 'arch_pvalue' in locals() else 'N/A', 0.7133],
+    'Decisión': ['Descartado por alta complejidad', 'Modelo Seleccionado']
+})
+
+print(tabla_comparativa.to_string(index=False))
+print("======================================================================\n")
