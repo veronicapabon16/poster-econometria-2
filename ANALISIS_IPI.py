@@ -46,6 +46,10 @@ serie_ipi_log = np.log(serie_ipi)
 # Primera diferencia sobre el logaritmo
 serie_ipi_diff = serie_ipi_log.diff().dropna()
 
+
+#--------------------------------------------------------------------------
+# MODELO A: ARIMA LOG+DIFERENCIADO+DUMMY
+#--------------------------------------------------------------------------
 # %% Inspección y estadísticas descriptivas -----------------------------------
 print("=== INSPECCIÓN INICIAL DE LA SERIE ===")
 print(f"Tipo de objeto: {type(serie_ipi)}")
@@ -128,7 +132,7 @@ if kpss_result[1] < 0.05:
 else:
     print("KPSS: No rechazamos H0. Según el test, la serie es estacionaria.")
 
-# %% Paso 2: Diferenciación de la Serie --------------------------------------
+# %% Diferenciación de la Serie --------------------------------------
 
 # 1. Primera diferencia de la serie
 serie_ipi_diff = serie_ipi_log.diff().dropna()
@@ -142,6 +146,8 @@ plt.ylabel("Diferencia")
 plt.grid(True)
 plt.show()
 
+
+#
 # %% FAC y FACP de la serie diferenciada --------------------------------------
 fig, axes = plt.subplots(1, 2, figsize=(14, 5))
 
@@ -189,6 +195,13 @@ if kpss_result_diff[1] < 0.05:
 else:
     print("KPSS: No rechazamos H0. La serie diferenciada ES ESTACIONARIA.")
 
+
+
+
+
+#-----------------------------------------------------------------
+# MODELO B: SARIMAX CON VAR. EXOGENA
+#----------------------------------------------------------------
 # %% ==========================================================================
 # PASO 1: IDENTIFICACIÓN Y EVALUACIÓN DE ESTACIONARIEDAD
 # =============================================================================
@@ -294,10 +307,21 @@ axes[1, 1].grid(True, linestyle='--', alpha=0.5)
 
 plt.tight_layout()
 plt.show()
+
+
+
+
+
+
+
 #----------------------------------------------------------------------------------------------------------------------------
-# %% ==========================================================================
-# OPCIÓN B: DESESTACIONALIZACIÓN STL + EVALUACIÓN DE ESTACIONARIEDAD
-# =============================================================================
+# %% ------------------------------------------------------------------------
+# OPCIÓN C: SARIMA + DESESTACIONALIZACIÓN STL + EVALUACIÓN DE ESTACIONARIEDAD
+# ----------------------------------------------------------------------------------------
+
+#PASO 1 IDENTIFICACION------------------------------------------------------------------------------
+
+
 from statsmodels.tsa.seasonal import STL
 
 print("=== PASO 1: DESESTACIONALIZACIÓN STL Y EVALUACIÓN DE ESTACIONARIEDAD ===")
@@ -361,9 +385,9 @@ dummy_covid = pd.Series(0, index=serie_ipi_log.index, name='dummy_covid')
 dummy_covid.loc['2020-03-01':'2020-05-01'] = 1
 print("\nVariable Dummy COVID generada correctamente.")
 
-# %% ==========================================================================
-# PASO 2: BÚSQUEDA SISTEMÁTICA DE MODELOS ARIMA + DUMMY COVID
-# =============================================================================
+# %% 
+# PASO 2: ESTIMACION DEL MODELO------------------------------------------------------------
+
 print("\n=== PASO 2: ESTIMACIÓN Y BÚSQUEDA DE MODELOS ARIMA CON DUMMY ===")
 
 candidatos_arima = [
@@ -424,9 +448,9 @@ fit_arima_final = mejor_info['Fit_Obj']
 print(fit_arima_final.summary())
 
 
-# %% ==========================================================================
-# PASO 3: DIAGNÓSTICO FORMAL DE SUPUESTOS RESIDUALES
-# =============================================================================
+# %% 
+# PASO 3: DIAGNÓSTICO FORMAL DE SUPUESTOS RESIDUALES----------------------------------------------------------------
+
 print("\n=== PASO 3: DIAGNÓSTICO FORMAL DE RESIDUOS ===")
 # Descartar los 2 primeros residuos iniciales (condición inicial no diferenciada de Enero y Febrero 2014)
 residuos_arima = fit_arima_final.resid.iloc[3:]
@@ -475,6 +499,13 @@ axes[1, 1].grid(True, linestyle='--', alpha=0.5)
 
 plt.tight_layout()
 plt.show()
+
+
+
+
+
+
+
 # %% ==========================================================================
 # MÓDULO AL FINAL: EVALUACIÓN DE MODELOS ALTERNATIVOS (PARA EL PÓSTER - Nos puede resultar útil para justificar nuestra elección)
 # =============================================================================
