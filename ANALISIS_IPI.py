@@ -429,7 +429,7 @@ print(fit_arima_final.summary())
 # =============================================================================
 print("\n=== PASO 3: DIAGNÓSTICO FORMAL DE RESIDUOS ===")
 # Descartar los 2 primeros residuos iniciales (condición inicial no diferenciada de Enero y Febrero 2014)
-residuos_arima = fit_arima_final.resid.iloc[3:]
+residuos_arima = fit_arima_final.resid.iloc[2:]
 
 # Recalcular las pruebas diagnósticas con los residuos limpios
 print("\n=== DIAGNÓSTICO SIN RESIDUO INICIAL ===")
@@ -574,7 +574,7 @@ df_pronostico = pd.DataFrame({
 })
 
 # Revertir la transformación logarítmica para obtener la escala real del IPI
-df_pronostico['Pronóstico Escala Real (IPI)'] = np.exp(pronostico_puntual)
+df_pronostico['Pronóstico Desestacionalizado(IPI)'] = np.exp(pronostico_puntual)
 
 # Imprimir los valores en la consola
 print("\n--- Tabla de Pronósticos en Consola ---")
@@ -663,4 +663,130 @@ plt.savefig(ruta_imagen_tabla, bbox_inches='tight', dpi=300)
 plt.show()
 
 print(f"\n---> ¡ÉXITO! La imagen de la tabla fue guardada automáticamente en:\n     {ruta_imagen_tabla}")
+# %% # %% ==========================================================================
+# EXPORTACIÓN DE TODAS LAS GRÁFICAS OFICIALES PARA EL PÓSTER
+# =============================================================================
+# Para exportar las figuras y gráficas necesarias para nuestro poster
+
+import scipy.stats as stats
+from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
+
+print("\n=== GENERANDO Y GUARDANDO GRÁFICAS OFICIALES PARA EL PÓSTER ===")
+
+# -----------------------------------------------------------------------------
+# 1. SERIE TEMPORAL: NIVEL (Y_t) Y TASA DE CRECIMIENTO (Δ ln Y_t)
+# -----------------------------------------------------------------------------
+# Esto nos permite evaluar visualmente la tendencia estocástica y la 
+# estacionalidad en la serie original, y comprobar que la primera diferencia 
+# logarítmica vuelve la serie estacionaria (representando la tasa de crecimiento).
+
+# Crear una figura con 2 subgráficos alineados verticalmente que comparten el eje X (fechas)
+fig, axes = plt.subplots(2, 1, figsize=(10, 6), sharex=True, dpi=300)
+
+# Gráfico de arriba: Serie en Nivel original del IPI
+axes[0].plot(serie_ipi, color='#1e3a8a', linewidth=1.5)  # Azul oscuro académico
+axes[0].set_title("A. Índice de Producción Industrial (Serie Original en Nivel Y_t)", fontsize=11, fontweight='bold')
+axes[0].set_ylabel("Índice (Base DANE)")
+axes[0].grid(True, linestyle='--', alpha=0.5)  # Rejilla tenue para facilitar la lectura
+
+# Gráfico de abajo: Primera diferencia logarítmica (Tasa de crecimiento mensual)
+axes[1].plot(serie_ipi_log.diff().dropna(), color='#0284c7', linewidth=1.2)  # Azul medio
+axes[1].axhline(0, color='red', linestyle='--', linewidth=1)  # Línea de referencia en cero
+axes[1].set_title("B. Tasa de Crecimiento Mensual Aproximada (Δ ln Y_t)", fontsize=11, fontweight='bold')
+axes[1].set_ylabel("Variación Logarítmica")
+axes[1].set_xlabel("Fecha")
+axes[1].grid(True, linestyle='--', alpha=0.5)
+
+# Ajustar márgenes para evitar superposición de títulos y guardar en la raíz del proyecto
+plt.tight_layout()
+plt.savefig(BASE_DIR / "1_serie_temporal_ipi.png", dpi=300, bbox_inches='tight')
+plt.close()  # Cerrar la figura para liberar memoria RAM
+
+
+# -----------------------------------------------------------------------------
+# 2. ETAPA DE IDENTIFICACIÓN: CORRELOGRAMAS FAC Y FACP
+# -----------------------------------------------------------------------------
+# Con esto podemos analizar la estructura de autocorrelación serial de la
+# serie desestacionalizada y diferenciada para justificar los ordenes p y q.
+
+# Crear una figura de 1 fila y 2 columnas para poner FAC y FACP lado a lado
+fig, axes = plt.subplots(1, 2, figsize=(12, 4.5), dpi=300)
+
+# Graficar la Función de Autocorrelación (FAC) hasta 24 rezagos (2 años de historia)
+plot_acf(
+    serie_ipi_sa.diff().dropna(), 
+    ax=axes[0], 
+    lags=24, 
+    color='#1e3a8a', 
+    title="FAC Muestral (Serie Diferenciada Desestacionalizada)"
+)
+
+# Graficar la Función de Autocorrelación Parcial (FACP) hasta 24 rezagos
+plot_pacf(
+    serie_ipi_sa.diff().dropna(), 
+    ax=axes[1], 
+    lags=24, 
+    color='#1e3a8a', 
+    title="FACP Muestral (Serie Diferenciada Desestacionalizada)"
+)
+
+# Estilizar los ejes: limitar escala de correlación entre -1 y 1 
+for ax in axes:
+    ax.set_ylim(-1, 1)
+    ax.set_xlabel("Rezagos (Lags Mensuales)")
+    ax.grid(True, linestyle='--', alpha=0.5)
+
+# Guardar la imagen compuesta de identificación
+plt.tight_layout()
+plt.savefig(BASE_DIR / "2_fac_facp_identificacion.png", dpi=300, bbox_inches='tight')
+plt.close()
+
+
+# -----------------------------------------------------------------------------
+# 3. ETAPA DE DIAGNÓSTICO: EVALUACIÓN COMPLETA DE SUPUESTOS SOBRE RESIDUOS
+# -----------------------------------------------------------------------------
+# Para verificar que los residuos del ARIMA ganador cumplan las
+# propiedades de Ruido Blanco Gaussiano: no autocorrelación, homocedasticidad y normalidad.
+
+# Extraer los residuos purgando los 2 primeros periodos iniciales (por el filtro de Kalman)
+residuos_modelo = fit_arima_final.resid.iloc[2:]
+
+# Crear cuadrante de 2x2 para poner los 4 gráficos de diagnóstico
+fig, axes = plt.subplots(2, 2, figsize=(11, 7), dpi=300)
+
+# Cuadrante A (Arriba Izquierda): FAC de Residuos
+# Si las barras quedan dentro de la franja azul, se confirma Ausencia de Autocorrelación (Ljung-Box).
+plot_acf(residuos_modelo, ax=axes[0, 0], lags=24, color='#1e3a8a', title="A. FAC de Residuos (Evaluación Ruido Blanco)")
+axes[0, 0].set_ylim(-0.5, 0.5)  # Zoom sobre las bandas de confianza
+
+# Cuadrante B (Arriba Derecha): FAC de Residuos al Cuadrado (ε_t²)
+# Evalúa la presencia de efectos ARCH (dependencia en la varianza o volatilidad condicionada).
+plot_acf(residuos_modelo**2, ax=axes[0, 1], lags=24, color='#0284c7', title="B. FAC de Residuos² (Evaluación Efectos ARCH)")
+axes[0, 1].set_ylim(-0.5, 0.5)
+
+# Cuadrante C (Abajo Izquierdo): Histograma y Densidad Kernel (KDE)
+# Muestra la forma de la distribución empírica de los errores para evaluar la Normalidad (Jarque-Bera).
+axes[1, 0].hist(residuos_modelo, bins=25, density=True, color='#93c5fd', edgecolor='#1e3a8a', alpha=0.7)
+residuos_modelo.plot(kind='kde', ax=axes[1, 0], color='#1e3a8a', linewidth=2)  # Curva de densidad suave
+axes[1, 0].set_title("C. Distribución Empírica de Residuos vs. Normal")
+
+# Cuadrante D (Abajo Derecho): Gráfico Q-Q Normal
+# Compara los cuantiles empíricos contra una distribución teórica normal. Si siguen la línea roja, hay normalidad.
+stats.probplot(residuos_modelo, dist="norm", plot=axes[1, 1])
+axes[1, 1].get_lines()[0].set_markerfacecolor('#1e3a8a')  # Puntos azules
+axes[1, 1].get_lines()[0].set_markeredgecolor('#1e3a8a')
+axes[1, 1].get_lines()[1].set_color('red')                # Línea teórica de 45°
+axes[1, 1].set_title("D. Gráfico Q-Q Normal de Residuos")
+
+# Formato general del cuadrante
+for ax in axes.flat:
+    ax.grid(True, linestyle='--', alpha=0.4)
+
+# Guardar la imagen completa de diagnóstico residual
+plt.tight_layout()
+plt.savefig(BASE_DIR / "3_diagnostico_residuos_completo.png", dpi=300, bbox_inches='tight')
+plt.close()
+
+print("---> ¡ÉXITO! Todas las imágenes para el póster se han guardado correctamente en alta resolución en la raíz del proyecto.")
+
 # %%
