@@ -123,7 +123,7 @@ print("\n -> ¡ÉXITO! Se generó 'fac_facp_serie_original.png' correctamente.")
 
 #TRANSFORMACIONES A PARTIR DE LO OBSERVADO==================================================================================
 #%%Transformación logarítmica para estabilizar la varianza
-serie_log = np.log(serie_ipi)
+serie_ipi_log = np.log(serie_ipi)
 # Descomposición STL sobre la serie en logaritmo
 serie_log = np.log(serie_ipi)
 stl_decomp = STL(serie_log, seasonal=13).fit()
