@@ -473,6 +473,86 @@ jb_stat, jb_pval = jarque_bera(residuos_arima)
 print(f"\n3. Test de Jarque-Bera (Normalidad):")
 print(f"   Estadístico JB: {jb_stat:.4f} | p-valor: {jb_pval:.4f}")
 
+#%% TABLA RESUMEN DE SUPUESTOS-------------------------------------------
+
+# 1. Extracción de p-valores y datos clave
+pval_lb = lb_final.loc[12, 'lb_pvalue']
+
+datos_diagnostico = [
+    {
+        "Supuesto Evaluado": "No Autocorrelación (Ljung-Box)",
+        "Estadístico": f"{lb_final.loc[12, 'lb_stat']:.4f}",
+        "p-valor": f"{pval_lb:.4f}",
+        "Resultado": "CUMPLE" if pval_lb > 0.05 else "NO CUMPLE"
+    },
+    {
+        "Supuesto Evaluado": "Homocedasticidad (ARCH-LM)",
+        "Estadístico": f"{arch_stat:.4f}",
+        "p-valor": f"{arch_pval:.4f}",
+        "Resultado": "CUMPLE" if arch_pval > 0.05 else "NO CUMPLE"
+    },
+    {
+        "Supuesto Evaluado": "Normalidad (Jarque-Bera)",
+        "Estadístico": f"{jb_stat:.4f}",
+        "p-valor": f"{jb_pval:.4f}",
+        "Resultado": "CUMPLE" if jb_pval > 0.05 else "NO CUMPLE"
+    }
+]
+
+df_tabla_supuestos = pd.DataFrame(datos_diagnostico)
+
+# 2. Creación y diseño de la imagen de la tabla
+fig, ax = plt.subplots(figsize=(8.5, 2.8), dpi=300)
+ax.axis('off')
+
+# Dibujar la tabla
+tabla = ax.table(
+    cellText=df_tabla_supuestos.values,
+    colLabels=df_tabla_supuestos.columns,
+    cellLoc='center',
+    loc='center'
+)
+
+# Estilo visual para el póster
+tabla.auto_set_font_size(False)
+tabla.set_fontsize(11)
+tabla.scale(1.2, 2.0)
+
+# Personalización de colores en encabezados y celdas
+for (row, col), cell in tabla.get_celld().items():
+    if row == 0:
+        cell.set_text_props(weight='bold', color='white')
+        cell.set_facecolor('#1f77b4')  # Azul institucional
+    else:
+        # Colorear la columna "Resultado" (columna índice 3)
+        if col == 3:
+            texto = cell.get_text().get_text()
+            if texto == "CUMPLE":
+                cell.set_facecolor('#d4edda')  # Verde claro
+                cell.set_text_props(weight='bold', color='#155724')
+            else:
+                cell.set_facecolor('#f8d7da')  # Rojo claro
+                cell.set_text_props(weight='bold', color='#721c24')
+        else:
+            cell.set_facecolor('#f8f9fa' if row % 2 == 0 else '#ffffff')
+
+plt.title("DIAGNÓSTICO DE SUPUESTOS DE LOS RESIDUOS (MODELO ARIMA)", fontsize=12, weight='bold', pad=15)
+plt.tight_layout()
+
+# 3. Guardar la imagen en la carpeta del proyecto
+ruta_imagen_tabla = BASE_DIR / "tabla_supuestos_residuos.png" if 'BASE_DIR' in locals() else "tabla_supuestos_residuos.png"
+plt.savefig(ruta_imagen_tabla, bbox_inches='tight', dpi=300)
+plt.close()
+
+print(f"\n---> ¡ÉXITO! La tabla limpia se guardó como imagen en: {ruta_imagen_tabla}")
+
+
+
+#%%
+
+
+
+
 # Gráficos de diagnóstico residual integrados
 fig, axes = plt.subplots(2, 2, figsize=(12, 7))
 
@@ -572,128 +652,182 @@ tabla_comparativa = pd.DataFrame({
 print(tabla_comparativa.to_string(index=False))
 print("======================================================================\n")
 
+
+
 # %% ==========================================================================
 # PASO 4: PRONÓSTICO FUERA DE MUESTRA Y EXPORTACIÓN DE TABLA COMO IMAGEN (.PNG)
 # =============================================================================
+
 print("\n=== PASO 4: PRONÓSTICO FUERA DE MUESTRA Y EXPORTACIÓN DE TABLA COMO IMAGEN ===")
 
-# 1. Definir el horizonte de pronóstico (12 meses hacia adelante)
+# 1. Definir el horizonte de pronóstico: 12 meses
 horizonte_pronostico = 12
 
-# 2. Crear las fechas futuras basándose en la frecuencia mensual ('MS') de la serie
+# 2. Crear las fechas futuras con frecuencia mensual
 ultima_fecha = serie_ipi_sa.index[-1]
+
 fechas_futuras = pd.date_range(
-    start=ultima_fecha + pd.DateOffset(months=1), 
-    periods=horizonte_pronostico, 
-    freq='MS'
+    start=ultima_fecha + pd.offsets.MonthBegin(1),
+    periods=horizonte_pronostico,
+    freq="MS"
 )
 
-# 3. Crear la variable exógena futura para el horizonte de pronóstico
-# Como el shock de la pandemia (2020) ya ocurrió, los valores futuros de la dummy son 0
-dummy_covid_futuro = pd.Series(0, index=fechas_futuras, name='dummy_covid')
+# 3. Crear la variable exógena futura (dummy COVID = 0)
+dummy_covid_futuro = pd.Series(
+    0,
+    index=fechas_futuras,
+    name="dummy_covid",
+    dtype=int
+)
 
-# 4. Generar el pronóstico utilizando el objeto ajustado ganador (fit_arima_final)
-pronostico_obj = fit_arima_final.get_forecast(steps=horizonte_pronostico, exog=dummy_covid_futuro)
-pronostico_puntual = pronostico_obj.predicted_mean
-intervalos_confianza = pronostico_obj.conf_int(alpha=0.05)  # Intervalo al 95% de confianza
+# 4. Generar el pronóstico en escala logarítmica
+pronostico_obj = fit_arima_final.get_forecast(
+    steps=horizonte_pronostico,
+    exog=dummy_covid_futuro
+)
 
-# 5. Consolidar los resultados en un DataFrame
-df_pronostico = pd.DataFrame({
-    'Pronóstico ln(IPI)': pronostico_puntual,
-    'Límite Inferior (95%)': intervalos_confianza.iloc[:, 0],
-    'Límite Superior (95%)': intervalos_confianza.iloc[:, 1]
-})
+pronostico_log = pronostico_obj.predicted_mean
+intervalos_log = pronostico_obj.conf_int(alpha=0.05)
 
-# Revertir la transformación logarítmica para obtener la escala real del IPI
-df_pronostico['Pronóstico Desestacionalizado(IPI)'] = np.exp(pronostico_puntual)
+limite_inferior_log = intervalos_log.iloc[:, 0]
+limite_superior_log = intervalos_log.iloc[:, 1]
 
-# Imprimir los valores en la consola
-print("\n--- Tabla de Pronósticos en Consola ---")
+# 5. Retransformar el pronóstico y los intervalos a la escala del IPI
+df_pronostico = pd.DataFrame(index=fechas_futuras)
+df_pronostico.index.name = "Fecha"
+
+df_pronostico["Pronóstico ln(IPI SA)"] = pronostico_log
+df_pronostico["Límite inferior ln (95%)"] = limite_inferior_log
+df_pronostico["Límite superior ln (95%)"] = limite_superior_log
+
+df_pronostico["Pronóstico central IPI SA"] = np.exp(pronostico_log)
+df_pronostico["Límite inferior IPI SA (95%)"] = np.exp(limite_inferior_log)
+df_pronostico["Límite superior IPI SA (95%)"] = np.exp(limite_superior_log)
+
+print("\n--- Tabla de pronósticos ---")
 print(df_pronostico.to_string(float_format=lambda x: f"{x:.4f}"))
 
-# 6. Gráfico formal del pronóstico para el póster o análisis
+# 6. Gráfico del pronóstico en escala logarítmica
 plt.figure(figsize=(12, 6))
 
-# Graficar los últimos 36 meses de la serie histórica para dar contexto visual
+historico_reciente = serie_ipi_sa.iloc[-36:]
+
 plt.plot(
-    serie_ipi_sa.index[-36:], 
-    serie_ipi_sa.iloc[-36:], 
-    label='Histórico Ajustado (Últimos 3 años)', 
-    color='navy', 
+    historico_reciente.index,
+    historico_reciente,
+    label="Histórico desestacionalizado (últimos 36 meses)",
+    color="navy",
     linewidth=1.5
 )
 
-# Graficar la línea de pronóstico puntual
 plt.plot(
-    fechas_futuras, 
-    pronostico_puntual, 
-    label='Pronóstico (ARIMA + Dummy)', 
-    color='darkorange', 
-    marker='o', 
+    fechas_futuras,
+    pronostico_log,
+    label="Pronóstico puntual",
+    color="darkorange",
+    marker="o",
     linewidth=2
 )
 
-# Graficar la banda del intervalo de confianza (95%)
 plt.fill_between(
     fechas_futuras,
-    intervalos_confianza.iloc[:, 0],
-    intervalos_confianza.iloc[:, 1],
-    color='orange',
+    limite_inferior_log.to_numpy(),
+    limite_superior_log.to_numpy(),
+    color="orange",
     alpha=0.2,
-    label='Intervalo de Confianza (95%)'
+    label="Intervalo de predicción del 95%"
 )
 
-plt.title("Pronóstico del Índice de Producción Industrial (Enfoque STL + ARIMA + Dummy)", fontsize=12, fontweight='bold')
+plt.title(
+    "Pronóstico del IPI desestacionalizado: STL + ARIMA + dummy COVID",
+    fontsize=12,
+    fontweight="bold"
+)
 plt.xlabel("Fecha")
-plt.ylabel("ln(IPI) - Ajustado por Estacionalidad")
-plt.legend(loc='upper left')
-plt.grid(True, linestyle='--', alpha=0.5)
+plt.ylabel("ln(IPI) desestacionalizado")
+plt.legend(loc="best")
+plt.grid(True, linestyle="--", alpha=0.5)
 plt.tight_layout()
 plt.show()
 
-# 7. GENERACIÓN Y GUARDADO DE LA TABLA COMO ARCHIVO DE IMAGEN (.PNG)
+# 7. Exportar la tabla de pronósticos filtrada como imagen PNG
 df_tabla = df_pronostico.copy()
-df_tabla.index = df_tabla.index.strftime('%Y-%m')
+df_tabla.index = df_tabla.index.strftime("%Y-%m")
 
-columnas = ['Fecha', 'ln(IPI)', 'Límite Inf. (95%)', 'Límite Sup. (95%)', 'IPI Escala Real']
-valores = [[idx] + [f"{val:.4f}" for val in row] for idx, row in zip(df_tabla.index, df_tabla.values)]
+# Selección estricta de las columnas solicitadas
+columnas_tabla = [
+    "Fecha",
+    "Límite inferior IPI SA (95%)",
+    "Límite superior IPI SA (95%)"
+]
 
-# Crear figura para la tabla
-fig, ax = plt.subplots(figsize=(10, 6), dpi=300)
-ax.axis('tight')
-ax.axis('off')
+columnas_numericas = [
+    "Límite inferior IPI SA (95%)",
+    "Límite superior IPI SA (95%)"
+]
 
-# Renderizar la tabla con estilos profesionales
+valores_tabla = [
+    [fecha] + [f"{valor:.4f}" for valor in fila]
+    for fecha, fila in zip(
+        df_tabla.index,
+        df_tabla[columnas_numericas].to_numpy()
+    )
+]
+
+fig, ax = plt.subplots(figsize=(8, 5), dpi=300)
+ax.axis("off")
+
 tabla = ax.table(
-    cellText=valores,
-    colLabels=columnas,
-    cellLoc='center',
-    loc='center'
+    cellText=valores_tabla,
+    colLabels=columnas_tabla,
+    cellLoc="center",
+    loc="center"
 )
 
 tabla.auto_set_font_size(False)
-tabla.set_fontsize(9)  # <--- CORREGIDO AQUÍ
-tabla.scale(1.2, 1.5)
+tabla.set_fontsize(10)
+tabla.scale(1.2, 1.6)
 
-# Estilizar celdas y encabezados (Azul académico y filas alternadas)
-for (row, col), cell in tabla.get_celld().items():
-    if row == 0:
-        cell.set_facecolor('#1e3a8a')
-        cell.get_text().set_color('white')
-        cell.get_text().set_weight('bold')
-    elif row % 2 == 0:
-        cell.set_facecolor('#f1f5f9')
+for (fila, columna), celda in tabla.get_celld().items():
+    if fila == 0:
+        celda.set_facecolor("#1e3a8a")
+        celda.get_text().set_color("white")
+        celda.get_text().set_weight("bold")
+    elif fila % 2 == 0:
+        celda.set_facecolor("#f1f5f9")
     else:
-        cell.set_facecolor('#ffffff')
+        celda.set_facecolor("#ffffff")
 
-plt.title("TABLA DE PRONÓSTICOS DEL ÍNDICE DE PRODUCCIÓN INDUSTRIAL (IPI)", fontsize=12, fontweight='bold', pad=15)
+plt.title(
+    "INTERVALOS DE PRONÓSTICO IPI SA (95%)",
+    fontsize=12,
+    fontweight="bold",
+    pad=15
+)
+plt.tight_layout()
 
-# Guardar la imagen en el directorio de trabajo
-ruta_imagen_tabla = BASE_DIR / "tabla_pronostico_ipi.png"
-plt.savefig(ruta_imagen_tabla, bbox_inches='tight', dpi=300)
-plt.show()
+ruta_imagen_tabla = BASE_DIR / "tabla_pronostico_ipi.png" if 'BASE_DIR' in locals() else "tabla_pronostico_ipi.png"
+plt.savefig(ruta_imagen_tabla, bbox_inches="tight", dpi=300)
+plt.close(fig)
 
-print(f"\n---> ¡ÉXITO! La imagen de la tabla fue guardada automáticamente en:\n     {ruta_imagen_tabla}")
+print(
+    "\nLa tabla filtrada de pronósticos se guardó correctamente en:\n"
+    f"{ruta_imagen_tabla}"
+)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 # %% # %% ==========================================================================
 # EXPORTACIÓN DE TODAS LAS GRÁFICAS OFICIALES PARA EL PÓSTER
 # =============================================================================
@@ -821,3 +955,114 @@ plt.close()
 print("---> ¡ÉXITO! Todas las imágenes para el póster se han guardado correctamente en alta resolución en la raíz del proyecto.")
 
 # %%
+
+
+# %% ==========================================================================
+# PASO 4: PRONÓSTICO FUERA DE MUESTRA Y EXPORTACIÓN DE TABLA COMO IMAGEN (.PNG)
+# =============================================================================
+
+print("\n=== PASO 4: PRONÓSTICO FUERA DE MUESTRA Y EXPORTACIÓN DE TABLA COMO IMAGEN ===")
+
+# 1. Definir el horizonte de pronóstico: 12 meses
+horizonte_pronostico = 12
+
+# 2. Crear las fechas futuras con frecuencia mensual
+ultima_fecha = serie_ipi_sa.index[-1]
+
+fechas_futuras = pd.date_range(
+    start=ultima_fecha + pd.offsets.MonthBegin(1),
+    periods=horizonte_pronostico,
+    freq="MS"
+)
+
+# 3. Crear la variable exógena futura (dummy COVID = 0)
+dummy_covid_futuro = pd.Series(
+    0,
+    index=fechas_futuras,
+    name="dummy_covid",
+    dtype=int
+)
+
+# 4. Generar el pronóstico en escala logarítmica
+pronostico_obj = fit_arima_final.get_forecast(
+    steps=horizonte_pronostico,
+    exog=dummy_covid_futuro
+)
+
+pronostico_log = pronostico_obj.predicted_mean
+intervalos_log = pronostico_obj.conf_int(alpha=0.05)
+
+limite_inferior_log = intervalos_log.iloc[:, 0]
+limite_superior_log = intervalos_log.iloc[:, 1]
+
+# 5. Construcción del DataFrame exclusivamente en escala logarítmica
+df_pronostico = pd.DataFrame(index=fechas_futuras)
+df_pronostico.index.name = "Fecha"
+
+df_pronostico["Pronóstico ln(IPI SA)"] = pronostico_log
+df_pronostico["Límite inferior ln (95%)"] = limite_inferior_log
+df_pronostico["Límite superior ln (95%)"] = limite_superior_log
+
+# 6. Exportar la tabla de pronósticos en logaritmos como imagen PNG
+df_tabla = df_pronostico.copy()
+df_tabla.index = df_tabla.index.strftime("%Y-%m")
+
+# Selección estricta de columnas en escala logarítmica
+columnas_tabla = [
+    "Fecha",
+    "Pronóstico ln(IPI SA)",
+    "Límite inferior ln (95%)",
+    "Límite superior ln (95%)"
+]
+
+columnas_numericas = [
+    "Pronóstico ln(IPI SA)",
+    "Límite inferior ln (95%)",
+    "Límite superior ln (95%)"
+]
+
+valores_tabla = [
+    [fecha] + [f"{valor:.4f}" for valor in fila]
+    for fecha, fila in zip(
+        df_tabla.index,
+        df_tabla[columnas_numericas].to_numpy()
+    )
+]
+
+fig, ax = plt.subplots(figsize=(10, 5), dpi=300)
+ax.axis("off")
+
+tabla = ax.table(
+    cellText=valores_tabla,
+    colLabels=columnas_tabla,
+    cellLoc="center",
+    loc="center"
+)
+
+tabla.auto_set_font_size(False)
+tabla.set_fontsize(9.5)
+tabla.scale(1.2, 1.5)
+
+for (fila, columna), celda in tabla.get_celld().items():
+    if fila == 0:
+        celda.set_facecolor("#1e3a8a")
+        celda.get_text().set_color("white")
+        celda.get_text().set_weight("bold")
+    elif fila % 2 == 0:
+        celda.set_facecolor("#f1f5f9")
+    else:
+        celda.set_facecolor("#ffffff")
+
+plt.title(
+    "PRONÓSTICO E INTERVALOS DEL IPI DESESTACIONALIZADO (ESCALA LOGARÍTMICA)",
+    fontsize=11,
+    fontweight="bold",
+    pad=15
+)
+plt.tight_layout()
+
+ruta_imagen_tabla = BASE_DIR / "tabla_pronostico_ipi.png" if 'BASE_DIR' in locals() else "tabla_pronostico_ipi.png"
+plt.savefig(ruta_imagen_tabla, bbox_inches="tight", dpi=300)
+plt.close(fig)
+
+print(f"\n---> ¡ÉXITO! La tabla en escala logarítmica se guardó correctamente en: {ruta_imagen_tabla}")

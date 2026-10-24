@@ -1,0 +1,33 @@
+{
+  "build": "5_cp315",
+  "build_number": 5,
+  "channel": "https://repo.anaconda.com/pkgs/main/win-64",
+  "constrains": [
+    "python 3.15.* *_cp315"
+  ],
+  "depends": [],
+  "extracted_package_dir": "C:\\Users\\ACER\\Documents\\Python Scripts\\pkgs\\python_abi-3.15-5_cp315",
+  "files": [
+    ".nonadmin"
+  ],
+  "fn": "python_abi-3.15-5_cp315.conda",
+  "license": "BSD-3-Clause",
+  "link": {
+    "source": "C:\\Users\\ACER\\Documents\\Python Scripts\\pkgs\\python_abi-3.15-5_cp315",
+    "type": 1
+  },
+  "md5": "4b7c55149b584f7a1ba518010daca732",
+  "name": "python_abi",
+  "package_tarball_full_path": "C:\\Users\\ACER\\Documents\\Python Scripts\\pkgs\\python_abi-3.15-5_cp315.conda",
+  "paths_data": {
+    "paths": [],
+    "paths_version": 1
+  },
+  "requested_spec": "None",
+  "sha256": "8fdb2f5c61acd2e93e2a6e430ec677849c7e57d45d60172c8ff395f0af7e679a",
+  "size": 5456,
+  "subdir": "win-64",
+  "timestamp": 1790773344000,
+  "url": "https://repo.anaconda.com/pkgs/main/win-64/python_abi-3.15-5_cp315.conda",
+  "version": "3.15"
+}
